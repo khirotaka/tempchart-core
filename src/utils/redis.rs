@@ -1,5 +1,3 @@
-extern crate redis;
-
 use num_traits::cast::ToPrimitive;
 use redis::{Commands, RedisResult};
 use chrono::{Local, DateTime, TimeZone};
@@ -37,7 +35,7 @@ impl Database {
         self.connection = Some(connection);
     }
 
-    pub fn record(&mut self, temperature: f32) {
+    pub fn record(&mut self, user_id: u8, temperature: f32) {
         let mut rng = rand::thread_rng();
         let rand_value: f64 = rng.gen();
 
@@ -47,7 +45,7 @@ impl Database {
         let result: RedisResult<f32> = self.connection.as_mut()
             .expect("Failed to connect database")
             .zadd(
-                "temperature",
+                user_id,
                 temperature,
                 timestamp,
             );
@@ -57,7 +55,12 @@ impl Database {
         };
     }
 
-    pub fn fetch_record(&mut self, start: DateTime<Local>, end: DateTime<Local>) -> Vec<(DateTime<Local>, f32)> {
+    pub fn fetch_record(
+        &mut self,
+        user_id: u8,
+        start: DateTime<Local>,
+        end: DateTime<Local>
+    ) -> Vec<(DateTime<Local>, f32)> {
         if end > start {
             let start_unix = start.timestamp().to_f64().unwrap();
             let end_unix = end.timestamp().to_f64().unwrap();
@@ -66,7 +69,7 @@ impl Database {
                 self.connection.as_mut()
                     .expect("Failed to connect database")
                     .zrangebyscore_withscores(
-                        "temperature", start_unix, end_unix
+                        user_id, start_unix, end_unix
                     );
 
             let time: Vec<(f32, f32)> = match result {
@@ -102,19 +105,34 @@ mod tests {
         let mut db = Database::new();
         db.connect();
 
-        db.record(32.3);
+        db.record(1, 32.3);
         std::thread::sleep(std::time::Duration::from_secs(1));
 
-        db.record(54.3);
+        db.record(1, 54.3);
         std::thread::sleep(std::time::Duration::from_secs(1));
 
-        db.record(76.3);
+        db.record(1, 76.3);
         std::thread::sleep(std::time::Duration::from_secs(1));
 
         let end = Local::now();
-        let result = db.fetch_record(start, end);
+        let result = db.fetch_record(1, start, end);
 
         let values: Vec<&f32> = result.iter().map(|(_,v)|v).collect();
+        println!("{:?}", values);
 
+        db.record(2, 33.1);
+        std::thread::sleep(std::time::Duration::from_secs(1));
+
+        db.record(2, 3.21);
+        std::thread::sleep(std::time::Duration::from_secs(1));
+
+        db.record(2, 4.32);
+        std::thread::sleep(std::time::Duration::from_secs(1));
+
+        let end = Local::now();
+        let result = db.fetch_record(2, start, end);
+
+        let values: Vec<&f32> = result.iter().map(|(_,v)|v).collect();
+        println!("{:?}", values);
     }
 }
