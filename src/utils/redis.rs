@@ -35,6 +35,19 @@ impl Database {
         self.connection = Some(connection);
     }
 
+    pub fn fetch_user_id(&mut self) -> Vec<u8> {
+        let result: RedisResult<Vec<u8>> = self.connection.as_mut()
+            .expect("Failed to connect database.")
+            .keys("*");
+
+        match result {
+            Ok(ids) => ids,
+            Err(e) => {
+                panic!("Failed to fetch the list of user ids.");
+            }
+        }
+    }
+
     pub fn record(&mut self, user_id: u8, temperature: f32) {
         let mut rng = rand::thread_rng();
         let rand_value: f64 = rng.gen();
