@@ -18,3 +18,39 @@ pub async fn create_connection(
 
     Ok(client)
 }
+
+
+pub async fn create_user(client: &Client, username: &str) -> Result<i32, Error> {
+    let rows = client.query(
+        "SELECT id FROM user_list ORDER BY id DESC",
+        &[]
+    ).await?;
+
+    if rows.len() == 0 {
+        let user_id: i32 = 1;
+
+        client.query(
+            "INSERT INTO user_list\
+                (id,name)\
+             VALUES\
+                ($1::INTEGER, $2::VARCHAR)",
+            &[&user_id, &username]
+        ).await?;
+
+        Ok(user_id)
+    }
+    else {
+        let latest: Option<i32> = rows[0].get(0);
+        let next_id: i32 = latest.unwrap() + 1;
+
+        client.query(
+            "INSERT INTO user_list\
+                (id,name)\
+            VALUES\
+                ($1::INTEGER, $2::VARCHAR)",
+            &[&next_id, &username]
+        ).await?;
+
+        Ok(next_id)
+    }
+}
