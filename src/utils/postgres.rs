@@ -1,4 +1,5 @@
 use tokio_postgres::{NoTls, Error, Client};
+use chrono::{Local, DateTime};
 
 
 pub async fn create_connection(
@@ -53,4 +54,32 @@ pub async fn create_user(client: &Client, username: &str) -> Result<i32, Error> 
 
         Ok(next_id)
     }
+}
+
+pub async fn record(client: &Client, user_id: i32, temperature: f32) -> Result<(), Error> {
+    // log_id (primary key, i64), date(timestamp), user_id(i32), temperature(f32)
+    let timestamp: DateTime<Local> = Local::now();
+
+    let rows = client.query(
+        "SELECT log_id FROM temperatures ORDER BY log_id DESC",
+        &[]
+    ).await?;
+
+    let log_id: i64 = if rows.len() == 0 {
+        1
+    }
+    else {
+        let tmp: Option<i64> = rows[0].get(0);
+        tmp.unwrap() + 1
+    };
+
+    client.query(
+        "INSERT INTO temperatures\
+            (log_id,user_id,date,temperature)\
+        VALUES\
+            ($1::BIGINT, $2::INTEGER, $3::TIMESTAMP WITH TIME ZONE,$4::REAL)",
+        &[&log_id, &user_id, &timestamp, &temperature]
+    ).await?;
+
+    Ok(())
 }
