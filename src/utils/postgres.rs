@@ -20,7 +20,7 @@ pub async fn create_user(client: &Client, username: &str) -> Result<i32, Error> 
         .query("SELECT id FROM user_list ORDER BY id DESC", &[])
         .await?;
 
-    if rows.len() == 0 {
+    if rows.is_empty() {
         let user_id: i32 = 1;
 
         client
@@ -60,7 +60,7 @@ pub async fn record(client: &Client, user_id: i32, temperature: f32) -> Result<(
         .query("SELECT log_id FROM temperatures ORDER BY log_id DESC", &[])
         .await?;
 
-    let log_id: i64 = if rows.len() == 0 {
+    let log_id: i64 = if rows.is_empty() {
         1
     } else {
         let tmp: Option<i64> = rows[0].get(0);
