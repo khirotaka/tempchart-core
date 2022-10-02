@@ -80,5 +80,50 @@ pub async fn record(client: &Client, user_id: i32, temperature: f32) -> Result<(
     Ok(())
 }
 
-    Ok(())
+pub struct Record {
+    date: DateTime<Local>,
+    name: String,
+    temperature: f32,
+}
+
+pub async fn fetch_record(
+    client: &Client,
+    user_id: i32,
+    start: &DateTime<Local>,
+    end: &DateTime<Local>,
+) -> Result<Vec<Record>, Error> {
+    let rows = client
+        .query(
+            "SELECT \
+            temperatures.date, user_list.name, temperatures.temperature \
+        FROM \
+            temperatures \
+        INNER JOIN \
+            user_list \
+        ON \
+            temperatures.user_id = user_list.id \
+        WHERE \
+            user_list.id = $1::INTEGER \
+        AND \
+            temperatures.date \
+        BETWEEN \
+            $2::TIMESTAMP WITH TIME ZONE \
+        AND \
+            $3::TIMESTAMP WITH TIME ZONE",
+            &[&user_id, &start, &end],
+        )
+        .await?;
+
+    let mut records = Vec::<Record>::new();
+
+    for r in &rows {
+        let record = Record {
+            date: r.get(0),
+            name: r.get(1),
+            temperature: r.get(2),
+        };
+        records.push(record);
+    }
+
+    Ok(records)
 }
