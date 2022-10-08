@@ -1,6 +1,17 @@
+use chrono::{DateTime, Local};
+
+#[derive(Debug)]
+pub struct Record {
+    date: DateTime<Local>,
+    name: String,
+    temperature: f32,
+}
+
 pub mod raw {
+    use crate::utils::postgres::Record;
     use chrono::{DateTime, Local};
-    use tokio_postgres::{Client, Error, NoTls};
+    use tokio_postgres::{Client, Error, GenericClient, NoTls};
+
     pub async fn create_connection(user: &str, password: &str) -> Result<Client, Error> {
         let config = format!("host=localhost user={} password={}", user, password);
 
@@ -15,44 +26,36 @@ pub mod raw {
         Ok(client)
     }
 
-    pub async fn create_user(client: &Client, username: &str) -> Result<i32, Error> {
+    pub async fn create_user(
+        client: &Client,
+        user_id: &str,
+        username: &str,
+    ) -> Result<Option<()>, Error> {
         let rows = client
-            .query("SELECT id FROM user_list ORDER BY id DESC", &[])
+            .query(
+                "SELECT id FROM user_list WHERE id = $1::VARCHAR",
+                &[&user_id],
+            )
             .await?;
 
         if rows.is_empty() {
-            let user_id: i32 = 1;
-
             client
                 .query(
                     "INSERT INTO user_list\
-                    (id,name)\
-                 VALUES\
-                    ($1::INTEGER, $2::VARCHAR)",
+                (id,name)\
+             VALUES\
+                ($1::VARCHAR, $2::VARCHAR)",
                     &[&user_id, &username],
                 )
                 .await?;
 
-            Ok(user_id)
+            Ok(Some(()))
         } else {
-            let latest: Option<i32> = rows[0].get(0);
-            let next_id: i32 = latest.unwrap() + 1;
-
-            client
-                .query(
-                    "INSERT INTO user_list\
-                    (id,name)\
-                VALUES\
-                    ($1::INTEGER, $2::VARCHAR)",
-                    &[&next_id, &username],
-                )
-                .await?;
-
-            Ok(next_id)
+            Ok(None)
         }
     }
 
-    pub async fn record(client: &Client, user_id: i32, temperature: f32) -> Result<(), Error> {
+    pub async fn record(client: &Client, user_id: &str, temperature: f32) -> Result<(), Error> {
         // log_id (primary key, i64), date(timestamp), user_id(i32), temperature(f32)
         let timestamp: DateTime<Local> = Local::now();
 
@@ -72,7 +75,7 @@ pub mod raw {
                 "INSERT INTO temperatures\
                 (log_id,user_id,date,temperature)\
             VALUES\
-                ($1::BIGINT, $2::INTEGER, $3::TIMESTAMP WITH TIME ZONE,$4::REAL)",
+                ($1::BIGINT, $2::VARCHAR, $3::TIMESTAMP WITH TIME ZONE,$4::REAL)",
                 &[&log_id, &user_id, &timestamp, &temperature],
             )
             .await?;
@@ -80,15 +83,9 @@ pub mod raw {
         Ok(())
     }
 
-    pub struct Record {
-        date: DateTime<Local>,
-        name: String,
-        temperature: f32,
-    }
-
     pub async fn fetch_record(
         client: &Client,
-        user_id: i32,
+        user_id: &str,
         start: &DateTime<Local>,
         end: &DateTime<Local>,
     ) -> Result<Vec<Record>, Error> {
@@ -103,7 +100,7 @@ pub mod raw {
             ON \
                 temperatures.user_id = user_list.id \
             WHERE \
-                user_list.id = $1::INTEGER \
+                user_list.id = $1::VARCHAR \
             AND \
                 temperatures.date \
             BETWEEN \
@@ -126,5 +123,104 @@ pub mod raw {
         }
 
         Ok(records)
+    }
+}
+
+pub mod with_valid {
+    use crate::utils::postgres::Record;
+    use crate::utils::{auth, postgres::raw};
+    use chrono::{DateTime, Local};
+    use thiserror::Error;
+    use tokio_postgres::{Client, Error};
+
+    #[warn(clippy::enum_variant_names)]
+    #[derive(Debug, Error)]
+    pub enum DBError {
+        #[error("Certificate verification failed")]
+        JWTValidError,
+        #[error("A problem occurred on the database.  {0}")]
+        PostgresError(Error),
+        #[error("User already registered")]
+        UserAlreadyRegisteredError,
+    }
+
+    pub async fn create_connection(
+        token_id: &str,
+        user: &str,
+        password: &str,
+    ) -> Result<Client, DBError> {
+        match auth::valid_jwt(token_id).await {
+            Ok(_) => {
+                // Firebase AuthからのJWTの検証に成功
+                match raw::create_connection(user, password).await {
+                    Ok(c) => Ok(c),
+                    Err(e) => Err(DBError::PostgresError(e)),
+                }
+            }
+            Err(_) => {
+                // Firebase AuthからのJWTの検証に失敗
+                Err(DBError::JWTValidError)
+            }
+        }
+    }
+
+    pub async fn create_user(
+        token_id: &str,
+        client: &Client,
+        username: &str,
+    ) -> Result<(), DBError> {
+        match auth::valid_jwt(token_id).await {
+            Ok(token) => {
+                let user_id = token.claims.get("user_id").unwrap().as_str().unwrap();
+                match raw::create_user(client, user_id, username).await {
+                    Ok(result) => match result {
+                        Some(_) => Ok(()),
+                        None => Err(DBError::UserAlreadyRegisteredError),
+                    },
+                    Err(e) => Err(DBError::PostgresError(e)),
+                }
+            }
+            Err(_) => {
+                // Firebase AuthからのJWTの検証に失敗
+                Err(DBError::JWTValidError)
+            }
+        }
+    }
+
+    pub async fn record(token_id: &str, client: &Client, temperature: f32) -> Result<(), DBError> {
+        match auth::valid_jwt(token_id).await {
+            Ok(token) => {
+                let user_id = token.claims.get("user_id").unwrap().as_str().unwrap();
+                match raw::record(client, user_id, temperature).await {
+                    Ok(_) => Ok(()),
+                    Err(e) => Err(DBError::PostgresError(e)),
+                }
+            }
+            Err(_) => {
+                // Firebase AuthからのJWTの検証に失敗
+                Err(DBError::JWTValidError)
+            }
+        }
+    }
+
+    pub async fn fetch_record(
+        token_id: &str,
+        client: &Client,
+        start: &DateTime<Local>,
+        end: &DateTime<Local>,
+    ) -> Result<Vec<Record>, DBError> {
+        match auth::valid_jwt(token_id).await {
+            Ok(token) => {
+                let user_id = token.claims.get("user_id").unwrap().as_str().unwrap();
+                match raw::fetch_record(client, user_id, start, end).await {
+                    Ok(record) => Ok(record),
+                    Err(e) => Err(DBError::PostgresError(e)),
+                }
+            }
+            Err(_) => {
+                // Firebase AuthからのJWTの検証に失敗
+                Err(DBError::JWTValidError)
+            }
+        }
     }
 }
