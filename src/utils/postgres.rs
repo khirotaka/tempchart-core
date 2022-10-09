@@ -10,10 +10,34 @@ pub struct Record {
 pub mod raw {
     use crate::utils::postgres::Record;
     use chrono::{DateTime, Local};
-    use tokio_postgres::{Client, Error, GenericClient, NoTls};
+    use config::{Config, File};
+    use tokio_postgres::{Client, Error, NoTls};
 
-    pub async fn create_connection(user: &str, password: &str) -> Result<Client, Error> {
-        let config = format!("host=localhost user={} password={}", user, password);
+    pub async fn create_connection(config_path: &str) -> Result<Client, Error> {
+        let secrets = Config::builder()
+            .add_source(File::with_name(config_path))
+            .build()
+            .unwrap();
+
+        let username = match secrets.get_string("username") {
+            Ok(name) => name,
+            Err(e) => {
+                panic!("key: username is not found. {}", e);
+            }
+        };
+
+        let password = match secrets.get_string("password") {
+            Ok(pw) => pw,
+            Err(e) => {
+                panic!("key: password not found: {}", e)
+            }
+        };
+
+        let config = format!(
+            "host=localhost user={} password={}",
+            username.as_str(),
+            password.as_str()
+        );
 
         let (client, connection) = tokio_postgres::connect(config.as_str(), NoTls).await?;
 
@@ -144,15 +168,13 @@ pub mod with_valid {
         UserAlreadyRegisteredError,
     }
 
-    pub async fn create_connection(
-        token_id: &str,
-        user: &str,
-        password: &str,
-    ) -> Result<Client, DBError> {
+    pub async fn create_connection(token_id: &str) -> Result<Client, DBError> {
+        let config_path = "config/secrets/database.yaml";
+
         match auth::valid_jwt(token_id).await {
             Ok(_) => {
                 // Firebase AuthからのJWTの検証に成功
-                match raw::create_connection(user, password).await {
+                match raw::create_connection(config_path).await {
                     Ok(c) => Ok(c),
                     Err(e) => Err(DBError::PostgresError(e)),
                 }
