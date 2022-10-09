@@ -2,9 +2,9 @@ use chrono::{DateTime, Local};
 
 #[derive(Debug)]
 pub struct Record {
-    date: DateTime<Local>,
-    name: String,
-    temperature: f32,
+    pub(crate) date: DateTime<Local>,
+    pub(crate) name: String,
+    pub(crate) temperature: f32,
 }
 
 pub mod raw {
