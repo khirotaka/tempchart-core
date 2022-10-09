@@ -3,7 +3,6 @@ use chrono::{DateTime, Local};
 #[derive(Debug)]
 pub struct Record {
     pub(crate) date: DateTime<Local>,
-    pub(crate) name: String,
     pub(crate) temperature: f32,
 }
 
@@ -140,7 +139,6 @@ pub mod raw {
         for r in &rows {
             let record = Record {
                 date: r.get(0),
-                name: r.get(1),
                 temperature: r.get(2),
             };
             records.push(record);
