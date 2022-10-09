@@ -61,8 +61,7 @@ pub async fn valid_jwt(id_token: &str) -> Result<TokenData<HashMap<String, Value
 
     if expiration_time > now {
         Ok(decoded_token)
-    }
-    else {
+    } else {
         Err(anyhow!("The certificate has expired."))
     }
 }
